@@ -3,8 +3,8 @@ app.py - MediAssist AI: Main Streamlit Application
 A medical knowledge chatbot with RAG, live web search, and response modes.
 """
 
-from dotenv import load_dotenv
-load_dotenv()
+#from dotenv import load_dotenv
+#load_dotenv()
 
 import logging
 import streamlit as st
