@@ -3,7 +3,7 @@
 # ─────────────────────────────────────────────
 
 # Core Framework
-streamlit>=1.35.0
+streamlit>=1.63.0
 
 # LLM Providers (install the ones you need)
 openai>=1.30.0
