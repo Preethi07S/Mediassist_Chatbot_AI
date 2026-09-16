@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 def get_llm_response(
     messages: list,
     provider: str,
+    model: Optional[str] = None,
     system_prompt: str = "",
     temperature: float = 0.7,
     max_tokens: int = 1024,
@@ -22,6 +23,8 @@ def get_llm_response(
     Args:
         messages: List of {"role": ..., "content": ...} dicts
         provider: "openai" | "groq" | "gemini"
+        model: Specific model ID for the chosen provider. If omitted, each
+            provider function falls back to its configured default.
         system_prompt: System-level instruction
         temperature: Creativity level (0–1)
         max_tokens: Max tokens to generate
@@ -31,11 +34,11 @@ def get_llm_response(
     """
     try:
         if provider == "openai":
-            return _call_openai(messages, system_prompt, temperature, max_tokens)
+            return _call_openai(messages, system_prompt, temperature, max_tokens, model)
         elif provider == "groq":
-            return _call_groq(messages, system_prompt, temperature, max_tokens)
+            return _call_groq(messages, system_prompt, temperature, max_tokens, model)
         elif provider == "gemini":
-            return _call_gemini(messages, system_prompt, temperature, max_tokens)
+            return _call_gemini(messages, system_prompt, temperature, max_tokens, model)
         else:
             raise ValueError(f"Unsupported provider: {provider}")
     except Exception as e:
@@ -47,7 +50,7 @@ def get_llm_response(
 # OPENAI
 # ─────────────────────────────────────────────
 
-def _call_openai(messages: list, system_prompt: str, temperature: float, max_tokens: int) -> str:
+def _call_openai(messages: list, system_prompt: str, temperature: float, max_tokens: int, model: Optional[str] = None) -> str:
     try:
         from openai import OpenAI
         from config.config import OPENAI_API_KEY, OPENAI_MODEL
@@ -63,7 +66,7 @@ def _call_openai(messages: list, system_prompt: str, temperature: float, max_tok
         full_messages.extend(messages)
 
         response = client.chat.completions.create(
-            model=OPENAI_MODEL,
+            model=model or OPENAI_MODEL,
             messages=full_messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -78,7 +81,7 @@ def _call_openai(messages: list, system_prompt: str, temperature: float, max_tok
 # GROQ
 # ─────────────────────────────────────────────
 
-def _call_groq(messages: list, system_prompt: str, temperature: float, max_tokens: int) -> str:
+def _call_groq(messages: list, system_prompt: str, temperature: float, max_tokens: int, model: Optional[str] = None) -> str:
     try:
         from groq import Groq
         from config.config import GROQ_API_KEY, GROQ_MODEL
@@ -94,7 +97,7 @@ def _call_groq(messages: list, system_prompt: str, temperature: float, max_token
         full_messages.extend(messages)
 
         response = client.chat.completions.create(
-            model=GROQ_MODEL,
+            model=model or GROQ_MODEL,
             messages=full_messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -109,7 +112,7 @@ def _call_groq(messages: list, system_prompt: str, temperature: float, max_token
 # GEMINI
 # ─────────────────────────────────────────────
 
-def _call_gemini(messages: list, system_prompt: str, temperature: float, max_tokens: int) -> str:
+def _call_gemini(messages: list, system_prompt: str, temperature: float, max_tokens: int, model: Optional[str] = None) -> str:
     try:
         import google.generativeai as genai
         from config.config import GEMINI_API_KEY, GEMINI_MODEL
@@ -119,8 +122,8 @@ def _call_gemini(messages: list, system_prompt: str, temperature: float, max_tok
 
         genai.configure(api_key=GEMINI_API_KEY)
 
-        model = genai.GenerativeModel(
-            model_name=GEMINI_MODEL,
+        gemini_model = genai.GenerativeModel(
+            model_name=model or GEMINI_MODEL,
             system_instruction=system_prompt if system_prompt else None,
         )
 
@@ -130,7 +133,7 @@ def _call_gemini(messages: list, system_prompt: str, temperature: float, max_tok
             role = "user" if msg["role"] == "user" else "model"
             gemini_history.append({"role": role, "parts": [msg["content"]]})
 
-        chat = model.start_chat(history=gemini_history)
+        chat = gemini_model.start_chat(history=gemini_history)
         response = chat.send_message(
             messages[-1]["content"],
             generation_config=genai.types.GenerationConfig(

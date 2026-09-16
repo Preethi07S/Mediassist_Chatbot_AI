@@ -81,19 +81,22 @@ def build_user_message(
 def format_chat_history(history: list, max_turns: int = 10) -> list:
     """
     Convert Streamlit session history to LLM message format.
-    Limits to last N turns to stay within token limits.
+    Limits to last N turns to stay within token limits, and strips any
+    extra UI-only keys (e.g. "sources", used for the sidebar display)
+    that providers like Groq/OpenAI reject as unrecognized message fields.
 
     Args:
-        history: List of {"role": ..., "content": ...} dicts.
+        history: List of {"role": ..., "content": ..., ...} dicts. Any
+            keys beyond "role"/"content" are UI metadata and are dropped.
         max_turns: Maximum number of recent turns to include.
 
     Returns:
-        Trimmed list of message dicts.
+        Trimmed list of {"role": ..., "content": ...} dicts only.
     """
     try:
         if len(history) > max_turns * 2:
             history = history[-(max_turns * 2):]
-        return history
+        return [{"role": m["role"], "content": m["content"]} for m in history]
     except Exception as e:
         logger.error(f"History format error: {e}")
         return history

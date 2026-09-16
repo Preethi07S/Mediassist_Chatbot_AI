@@ -3,8 +3,12 @@ app.py - MediAssist AI: Main Streamlit Application
 A medical knowledge chatbot with RAG, live web search, and response modes.
 """
 
-#from dotenv import load_dotenv
-#load_dotenv()
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from the same folder as this file, regardless of which
+# directory `streamlit run` is launched from.
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 
 import logging
 import streamlit as st
@@ -33,7 +37,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────
 from config.config import (
     APP_TITLE, APP_SUBTITLE, APP_ICON,
-    DEFAULT_LLM_PROVIDER, TOP_K_RESULTS,
+    DEFAULT_LLM_PROVIDER, TOP_K_RESULTS, PROVIDER_MODELS, MODEL_LABELS,
 )
 from models.llm import get_llm_response, get_available_providers
 from models.embeddings import embed_texts  # invoked via rag pipeline
@@ -129,7 +133,27 @@ st.markdown("""
     }
 
     /* Hide Streamlit branding */
-    #MainMenu, footer, header { visibility: hidden; }
+        /* Hide just the Streamlit menu/footer, but keep the header container itself */
+        
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    [data-testid="stToolbar"] { visibility: hidden; }
+    header {
+        background: transparent;
+        box-shadow: none;
+    }
+
+    /* Streamlit's native sidebar collapse/reopen arrow is disabled here —
+       it has a known bug where it can become permanently stuck after being
+       clicked. Sidebar show/hide is instead driven entirely by our own
+       "Show/Hide sidebar" button in the main content area (see below),
+       which never lives inside the sidebar itself. */
+    [data-testid="stSidebarCollapseButton"],
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -147,6 +171,8 @@ def init_session_state():
         st.session_state.uploaded_files = []
     if "llm_provider" not in st.session_state:
         st.session_state.llm_provider = DEFAULT_LLM_PROVIDER
+    if "llm_model" not in st.session_state:
+        st.session_state.llm_model = PROVIDER_MODELS[DEFAULT_LLM_PROVIDER][0]
     if "response_mode" not in st.session_state:
         st.session_state.response_mode = "Detailed"
     if "use_web_search" not in st.session_state:
@@ -155,9 +181,18 @@ def init_session_state():
         st.session_state.use_rag = True
     if "auto_web_search" not in st.session_state:
         st.session_state.auto_web_search = False
+    if "sidebar_visible" not in st.session_state:
+        st.session_state.sidebar_visible = True
 
 
 init_session_state()
+
+# Our own sidebar visibility switch (replaces Streamlit's native toggle).
+if not st.session_state.sidebar_visible:
+    st.markdown(
+        '<style>[data-testid="stSidebar"] { display: none !important; }</style>',
+        unsafe_allow_html=True,
+    )
 
 
 # ─────────────────────────────────────────────
@@ -167,28 +202,39 @@ with st.sidebar:
     st.markdown("## ⚙️ Configuration")
     st.markdown("---")
 
-    # LLM Provider
+    # LLM Provider + Model — one dropdown, every model listed explicitly
     st.markdown("### 🤖 AI Model")
     available_providers = get_available_providers()
     provider_labels = {
-        "openai": "🟢 OpenAI GPT",
-        "groq": "⚡ Groq (LLaMA)",
-        "gemini": "💎 Google Gemini",
+        "openai": "🟢 OpenAI",
+        "groq": "⚡ Groq",
+        "gemini": "💎 Gemini",
     }
-    provider_options = available_providers
-    provider_display = [provider_labels.get(p, p) for p in provider_options]
 
-    selected_idx = 0
-    if st.session_state.llm_provider in provider_options:
-        selected_idx = provider_options.index(st.session_state.llm_provider)
+    # Flatten every (provider, model) pair from the available providers into
+    # a single list, so each dropdown entry is a specific, named model.
+    model_choices = [
+        (p, m)
+        for p in available_providers
+        for m in PROVIDER_MODELS.get(p, [])
+    ]
+
+    def _choice_label(choice: tuple) -> str:
+        p, m = choice
+        return f"{provider_labels.get(p, p)} — {MODEL_LABELS.get(m, m)}"
+
+    choice_display = [_choice_label(c) for c in model_choices]
+
+    current_choice = (st.session_state.llm_provider, st.session_state.llm_model)
+    selected_idx = model_choices.index(current_choice) if current_choice in model_choices else 0
 
     selected_display = st.selectbox(
         "Select Provider",
-        provider_display,
+        choice_display,
         index=selected_idx,
-        help="Choose which AI model powers your chat.",
+        help="Choose exactly which AI model powers your chat.",
     )
-    st.session_state.llm_provider = provider_options[provider_display.index(selected_display)]
+    st.session_state.llm_provider, st.session_state.llm_model = model_choices[choice_display.index(selected_display)]
 
     st.markdown("---")
 
@@ -287,6 +333,14 @@ with st.sidebar:
 # MAIN CONTENT
 # ─────────────────────────────────────────────
 
+# Our own sidebar toggle — this button lives in the main content area
+# (never inside the sidebar), so it stays reachable no matter what state
+# the sidebar is in.
+_toggle_label = "☰ Hide sidebar" if st.session_state.sidebar_visible else "☰ Show sidebar"
+if st.button(_toggle_label, key="_toggle_sidebar"):
+    st.session_state.sidebar_visible = not st.session_state.sidebar_visible
+    st.rerun()
+
 # Header
 st.markdown(f"""
 <div class="main-header">
@@ -304,7 +358,7 @@ with col2:
     web_status = "✅ Web Search On" if st.session_state.use_web_search else "❌ Web Search Off"
     st.markdown(f'<span class="status-badge badge-web">{web_status}</span>', unsafe_allow_html=True)
 with col3:
-    st.markdown(f'<span class="status-badge badge-ai">🤖 {st.session_state.llm_provider.upper()} · {st.session_state.response_mode}</span>', unsafe_allow_html=True)
+    st.markdown(f'<span class="status-badge badge-ai">🤖 {MODEL_LABELS.get(st.session_state.llm_model, st.session_state.llm_model)} · {st.session_state.response_mode}</span>', unsafe_allow_html=True)
 
 st.markdown("")
 
@@ -430,6 +484,7 @@ if user_input := st.chat_input("Ask a medical question..."):
             response_text = get_llm_response(
                 messages=history,
                 provider=st.session_state.llm_provider,
+                model=st.session_state.llm_model,
                 system_prompt=system_prompt,
                 temperature=0.4 if st.session_state.response_mode == "Concise" else 0.7,
                 max_tokens=512 if st.session_state.response_mode == "Concise" else 1536,
